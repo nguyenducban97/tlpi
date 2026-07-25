@@ -1,0 +1,5 @@
+libtlpi.a
+lib/*.o
+*.o
+lib/ename.c.inc
+*.elf
