@@ -15,6 +15,11 @@
 #include <fcntl.h>
 #include "tlpi_hdr.h"
 
+#ifdef MYOWN_IPLM
+static ssize_t t_readv(int fd, const struct iovec *iov, int iovcnt);
+static ssize_t t_writev(int fd, const struct iovec *iov, int iovcnt);
+#endif
+
 int
 main(int argc, char *argv[])
 {
@@ -24,12 +29,12 @@ main(int argc, char *argv[])
     int x;                      /* Second buffer */
 #define STR_SIZE 100
     char str[STR_SIZE];         /* Third buffer */
-    ssize_t numRead, totRequired;
+    ssize_t numRead, totRequired, numWrite;
 
     if (argc != 2 || strcmp(argv[1], "--help") == 0)
         usageErr("%s file\n", argv[0]);
 
-    fd = open(argv[1], O_RDONLY);
+    fd = open(argv[1], O_RDWR);
     if (fd == -1)
         errExit("open");
 
@@ -47,7 +52,11 @@ main(int argc, char *argv[])
     iov[2].iov_len = STR_SIZE;
     totRequired += iov[2].iov_len;
 
+#ifdef MYOWN_IPLM
+    numRead = t_readv(fd, iov, 3);
+#else
     numRead = readv(fd, iov, 3);
+#endif
     if (numRead == -1)
         errExit("readv");
 
@@ -56,5 +65,85 @@ main(int argc, char *argv[])
 
     printf("total bytes requested: %ld; bytes read: %ld\n",
             (long) totRequired, (long) numRead);
+
+#ifdef MYOWN_IPLM
+    lseek(fd, 0, SEEK_END);
+    numWrite = t_writev(fd, iov, 3);
+    if (numWrite == -1)
+        errExit("writev");
+
+    if (numWrite < totRequired)
+        printf("Write fewer bytes than requested\n");
+
+    printf("total bytes requested: %ld; bytes write: %ld\n",
+            (long) totRequired, (long) numWrite);
+#endif /*MYOWN_IPLM*/
+
+    close(fd);
     exit(EXIT_SUCCESS);
 }
+
+#ifdef MYOWN_IPLM
+static ssize_t t_readv(int fd, const struct iovec *iov, int iovcnt)
+{
+    int ret;
+    ssize_t sum_len=0;
+    ssize_t incre = 0;
+    ssize_t diff = 0;
+    ssize_t cp_len = 0;
+    char *buf = NULL;
+
+    for(int i=0; i < iovcnt; i++)
+    {
+        sum_len += iov[i].iov_len;
+    }
+    buf = malloc(sum_len);
+    if (buf == NULL) errExit("Malloc");
+    ret = read(fd, buf, sum_len);
+
+    if(ret > 0)
+    {
+        diff = ret;
+        for(int i=0; i < iovcnt; i++)
+        {
+            cp_len = iov[i].iov_len;
+            if(diff < iov[i].iov_len)
+            {
+                cp_len = diff;
+            }
+
+            memcpy(iov[i].iov_base, &buf[incre], cp_len);
+            incre += cp_len;
+            diff -= cp_len;
+        }
+    }
+    else
+    {
+        errExit("Read error");
+    }
+    free(buf);
+
+    return ret;
+}
+
+static ssize_t t_writev(int fd, const struct iovec *iov, int iovcnt)
+{
+    int ret;
+    ssize_t sum_len=0;
+    char *buf = NULL;
+
+    buf = malloc(sum_len);
+    if (buf == NULL) errExit("Malloc");
+    for(ssize_t i=0; i < iovcnt; i++)
+    {
+        memcpy(&buf[sum_len], iov[i].iov_base, iov[i].iov_len);
+        sum_len += iov[i].iov_len;
+    }
+
+    ret = write(fd, buf, sum_len);
+    free(buf);
+
+    return ret;
+}
+
+#endif /*MYOWN_IPLM*/
